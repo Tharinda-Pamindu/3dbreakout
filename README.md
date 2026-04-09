@@ -16,7 +16,7 @@ A 3D breakout game themed after the GitHub contribution graph, with webcam face-
 
 1. Open `index.html` in a modern browser (Chrome/Edge recommended)
 2. Allow camera access when prompted
-3. (Optional) Enter your GitHub username on the start screen and click **Load My Graph**
+3. (Optional) Enter your GitHub username or paste your profile URL on the start screen and click **Load My Graph**
 4. Press **SPACE** to start
 5. Move your head left/right to move the paddle
 6. Break all the blocks to win!

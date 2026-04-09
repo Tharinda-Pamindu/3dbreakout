@@ -439,6 +439,123 @@
     return /^[a-z\d](?:[a-z\d]|-(?=[a-z\d])){0,38}$/i.test(name);
   }
 
+  function normalizeGitHubUsername(input) {
+    const raw = (input || '').trim();
+    if (!raw) return '';
+
+    // Accept @username directly.
+    if (raw.startsWith('@')) {
+      return raw.slice(1).trim();
+    }
+
+    // Accept full profile URLs like https://github.com/user or github.com/user.
+    const looksLikeUrl = /^https?:\/\//i.test(raw) || /^github\.com\//i.test(raw);
+    if (!looksLikeUrl) {
+      return raw;
+    }
+
+    try {
+      const url = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
+      const host = url.hostname.toLowerCase();
+      if (host !== 'github.com' && host !== 'www.github.com') {
+        return raw;
+      }
+
+      const parts = url.pathname.split('/').filter(Boolean);
+      if (parts.length === 0) return '';
+
+      if (parts[0] === 'users' && parts[1]) {
+        return parts[1];
+      }
+
+      return parts[0];
+    } catch {
+      return raw;
+    }
+  }
+
+  function parseContributionSvg(svgText) {
+    if (typeof svgText !== 'string' || !svgText.trim()) return null;
+
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(svgText, 'image/svg+xml');
+    const rects = Array.from(doc.querySelectorAll('rect[data-date]'));
+    if (rects.length === 0) return null;
+
+    const pairs = [];
+    const levelMap = {
+      NONE: 0,
+      FIRST_QUARTILE: 1,
+      SECOND_QUARTILE: 2,
+      THIRD_QUARTILE: 3,
+      FOURTH_QUARTILE: 4,
+    };
+
+    for (let i = 0; i < rects.length; i++) {
+      const rect = rects[i];
+      const date = rect.getAttribute('data-date');
+      if (!date) continue;
+
+      const rawCount = rect.getAttribute('data-count');
+      const rawLevel = rect.getAttribute('data-level');
+
+      let count = 0;
+      if (rawCount !== null && rawCount !== '') {
+        const numeric = Number(rawCount);
+        if (Number.isFinite(numeric) && numeric >= 0) {
+          count = Math.round(numeric);
+        }
+      } else if (rawLevel && levelMap[rawLevel] !== undefined) {
+        count = levelMap[rawLevel];
+      }
+
+      pairs.push({ date, count });
+    }
+
+    return pairsToCommitGrid(pairs);
+  }
+
+  async function fetchContributionGridFromSvg(username) {
+    const encoded = encodeURIComponent(username);
+    const sourceUrl = `https://github.com/users/${encoded}/contributions`;
+    const urls = [
+      `https://api.allorigins.win/raw?url=${encodeURIComponent(sourceUrl)}`,
+      `https://r.jina.ai/http://github.com/users/${encoded}/contributions`,
+    ];
+
+    const errors = [];
+
+    for (let i = 0; i < urls.length; i++) {
+      const url = urls[i];
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 10000);
+
+      try {
+        const response = await fetch(url, {
+          headers: { Accept: 'image/svg+xml,text/plain,*/*' },
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          errors.push(`${url} -> HTTP ${response.status}`);
+          continue;
+        }
+
+        const text = await response.text();
+        const grid = parseContributionSvg(text);
+        if (grid) return grid;
+
+        errors.push(`${url} -> no usable svg contribution data`);
+      } catch (error) {
+        errors.push(`${url} -> ${error.message || 'request failed'}`);
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    throw new Error(errors.join(' | '));
+  }
+
   async function fetchContributionGrid(username) {
     const encoded = encodeURIComponent(username);
     const urls = [
@@ -477,33 +594,39 @@
       }
     }
 
+    try {
+      return await fetchContributionGridFromSvg(username);
+    } catch (svgError) {
+      errors.push(`svg fallback -> ${svgError.message || svgError}`);
+    }
+
     throw new Error(errors.join(' | '));
   }
 
   async function loadContributionGraphForUser(username, options = {}) {
-    const trimmed = (username || '').trim();
-    if (!trimmed) {
+    const normalized = normalizeGitHubUsername(username);
+    if (!normalized) {
       setGraphStatus('Enter a GitHub username first.', true);
       return false;
     }
 
-    if (!isValidGitHubUsername(trimmed)) {
-      setGraphStatus('That username format is invalid.', true);
+    if (!isValidGitHubUsername(normalized)) {
+      setGraphStatus('Use a valid GitHub username or profile URL.', true);
       return false;
     }
 
     loadGraphBtn.disabled = true;
     setGraphStatus(options.isAutoLoad
-      ? `Loading saved graph for @${trimmed}…`
-      : `Loading contribution graph for @${trimmed}…`);
+      ? `Loading saved graph for @${normalized}…`
+      : `Loading contribution graph for @${normalized}…`);
 
     try {
-      const grid = await fetchContributionGrid(trimmed);
+      const grid = await fetchContributionGrid(normalized);
       buildBlocksFromCommitData(grid);
       buildUICommitGraph();
-      localStorage.setItem(STORAGE_USERNAME_KEY, trimmed);
-      githubUserInput.value = trimmed;
-      setGraphStatus(`Loaded @${trimmed}'s contribution graph.`);
+      localStorage.setItem(STORAGE_USERNAME_KEY, normalized);
+      githubUserInput.value = normalized;
+      setGraphStatus(`Loaded @${normalized}'s contribution graph.`);
       return true;
     } catch (error) {
       setGraphStatus('Could not load live contributions. Using demo graph instead.', true);
