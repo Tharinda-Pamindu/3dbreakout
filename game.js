@@ -82,6 +82,9 @@
   const livesDisplay = document.getElementById('livesDisplay');
   const loadingEl = document.getElementById('loading');
   const commitGraphEl = document.getElementById('commitGraph');
+  const githubUserInput = document.getElementById('githubUserInput');
+  const loadGraphBtn = document.getElementById('loadGraphBtn');
+  const graphStatus = document.getElementById('graphStatus');
 
   // ─── Three.js Setup ─────────────────────────────────────────
   const scene = new THREE.Scene();
@@ -164,9 +167,16 @@
   // ─── Blocks (Commit Graph) ─────────────────────────────────
   const blocks = [];
   const blockGeo = new THREE.BoxGeometry(BLOCK_SIZE, BLOCK_SIZE, BLOCK_DEPTH);
+  const STORAGE_USERNAME_KEY = 'gh-breakout-username';
 
-  // Generate commit-graph-like data
-  function generateCommitData() {
+  let commitData = null;
+
+  function createEmptyGrid() {
+    return Array.from({ length: GRID_ROWS }, () => Array(GRID_COLS).fill(0));
+  }
+
+  // Generate demo commit-graph-like data
+  function generateDemoCommitData() {
     const data = [];
     for (let row = 0; row < GRID_ROWS; row++) {
       data[row] = [];
@@ -195,18 +205,24 @@
     return data;
   }
 
-  let commitData;
-
-  function buildBlocks() {
-    // Clear existing blocks
-    blocks.forEach(b => { if (b.mesh) scene.remove(b.mesh); });
+  function clearBlocks() {
+    blocks.forEach(b => {
+      if (b.mesh) {
+        scene.remove(b.mesh);
+        b.mesh.geometry.dispose();
+        b.mesh.material.dispose();
+      }
+    });
     blocks.length = 0;
     blocksAlive = 0;
+  }
 
-    commitData = generateCommitData();
+  function buildBlocksFromCommitData(data) {
+    clearBlocks();
+
+    commitData = data;
 
     const gridW = GRID_COLS * BLOCK_SPACING;
-    const gridH = GRID_ROWS * BLOCK_SPACING;
     const startX = -gridW / 2 + BLOCK_SPACING / 2;
     const startY = FIELD_H / 2 - 2.5;
 
@@ -245,11 +261,265 @@
     }
   }
 
-  buildBlocks();
+  function rebuildBlocksFromCurrentData() {
+    if (!commitData) {
+      buildBlocksFromCommitData(generateDemoCommitData());
+      return;
+    }
+    buildBlocksFromCommitData(commitData);
+  }
 
-  // Build decorative commit graph on start screen
+  function setGraphStatus(message, isError = false) {
+    graphStatus.textContent = message;
+    graphStatus.classList.toggle('error', isError);
+  }
+
+  function normalizeCountsToLevels(countGrid) {
+    const values = [];
+    for (let row = 0; row < GRID_ROWS; row++) {
+      for (let col = 0; col < GRID_COLS; col++) {
+        if (countGrid[row][col] > 0) {
+          values.push(countGrid[row][col]);
+        }
+      }
+    }
+
+    if (values.length === 0) {
+      return createEmptyGrid();
+    }
+
+    values.sort((a, b) => a - b);
+    const min = values[0];
+    const max = values[values.length - 1];
+
+    if (min === max) {
+      const levelGrid = createEmptyGrid();
+      for (let row = 0; row < GRID_ROWS; row++) {
+        for (let col = 0; col < GRID_COLS; col++) {
+          if (countGrid[row][col] > 0) levelGrid[row][col] = 3;
+        }
+      }
+      return levelGrid;
+    }
+
+    const q1 = values[Math.floor((values.length - 1) * 0.25)];
+    const q2 = values[Math.floor((values.length - 1) * 0.50)];
+    const q3 = values[Math.floor((values.length - 1) * 0.75)];
+
+    const levelGrid = createEmptyGrid();
+    for (let row = 0; row < GRID_ROWS; row++) {
+      for (let col = 0; col < GRID_COLS; col++) {
+        const value = countGrid[row][col];
+        if (value <= 0) continue;
+        if (value <= q1) levelGrid[row][col] = 1;
+        else if (value <= q2) levelGrid[row][col] = 2;
+        else if (value <= q3) levelGrid[row][col] = 3;
+        else levelGrid[row][col] = 4;
+      }
+    }
+
+    return levelGrid;
+  }
+
+  function parseDateToUTC(dateLike) {
+    if (typeof dateLike !== 'string' || !dateLike) return null;
+    const parsed = new Date(dateLike);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate()));
+  }
+
+  function toISODateUTC(date) {
+    return date.toISOString().slice(0, 10);
+  }
+
+  function startOfWeekUTC(date) {
+    const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+    d.setUTCDate(d.getUTCDate() - d.getUTCDay());
+    return d;
+  }
+
+  function getCountFromNode(node) {
+    const numericKeys = ['count', 'contributionCount', 'contributions', 'value', 'total'];
+    for (let i = 0; i < numericKeys.length; i++) {
+      const candidate = node[numericKeys[i]];
+      if (typeof candidate === 'number' && Number.isFinite(candidate)) {
+        return Math.max(0, Math.round(candidate));
+      }
+    }
+
+    if (typeof node.level === 'number' && Number.isFinite(node.level)) {
+      return Math.max(0, Math.round(node.level));
+    }
+
+    if (typeof node.level === 'string') {
+      const levelMap = {
+        NONE: 0,
+        FIRST_QUARTILE: 1,
+        SECOND_QUARTILE: 2,
+        THIRD_QUARTILE: 3,
+        FOURTH_QUARTILE: 4,
+      };
+      if (levelMap[node.level] !== undefined) {
+        return levelMap[node.level];
+      }
+    }
+
+    return null;
+  }
+
+  function extractDateCountPairs(node, out, seen) {
+    if (!node || typeof node !== 'object') return;
+    if (seen.has(node)) return;
+    seen.add(node);
+
+    if (Array.isArray(node)) {
+      for (let i = 0; i < node.length; i++) {
+        extractDateCountPairs(node[i], out, seen);
+      }
+      return;
+    }
+
+    const count = getCountFromNode(node);
+    if (typeof node.date === 'string' && count !== null) {
+      out.push({ date: node.date, count });
+    }
+
+    for (const key in node) {
+      extractDateCountPairs(node[key], out, seen);
+    }
+  }
+
+  function pairsToCommitGrid(pairs) {
+    if (!pairs || pairs.length === 0) return null;
+
+    const dayCountMap = new Map();
+    let maxDate = null;
+
+    for (let i = 0; i < pairs.length; i++) {
+      const pair = pairs[i];
+      const parsedDate = parseDateToUTC(pair.date);
+      if (!parsedDate) continue;
+
+      const iso = toISODateUTC(parsedDate);
+      const previous = dayCountMap.get(iso) || 0;
+      dayCountMap.set(iso, Math.max(previous, pair.count));
+
+      if (!maxDate || parsedDate > maxDate) {
+        maxDate = parsedDate;
+      }
+    }
+
+    if (dayCountMap.size === 0) return null;
+
+    const endReference = maxDate || parseDateToUTC(new Date().toISOString());
+    const endWeek = startOfWeekUTC(endReference);
+    const start = new Date(endWeek);
+    start.setUTCDate(start.getUTCDate() - (GRID_COLS - 1) * 7);
+
+    const countGrid = createEmptyGrid();
+    for (let col = 0; col < GRID_COLS; col++) {
+      for (let row = 0; row < GRID_ROWS; row++) {
+        const day = new Date(start);
+        day.setUTCDate(start.getUTCDate() + col * 7 + row);
+        const iso = toISODateUTC(day);
+        countGrid[row][col] = dayCountMap.get(iso) || 0;
+      }
+    }
+
+    return normalizeCountsToLevels(countGrid);
+  }
+
+  function parseContributionPayload(payload) {
+    const pairs = [];
+    extractDateCountPairs(payload, pairs, new WeakSet());
+    return pairsToCommitGrid(pairs);
+  }
+
+  function isValidGitHubUsername(name) {
+    return /^[a-z\d](?:[a-z\d]|-(?=[a-z\d])){0,38}$/i.test(name);
+  }
+
+  async function fetchContributionGrid(username) {
+    const encoded = encodeURIComponent(username);
+    const urls = [
+      `https://github-contributions-api.jogruber.de/v4/${encoded}?y=last`,
+      `https://github-contributions-api.deno.dev/${encoded}.json`,
+      `https://github-contributions.vercel.app/api/v1/${encoded}`,
+    ];
+
+    const errors = [];
+
+    for (let i = 0; i < urls.length; i++) {
+      const url = urls[i];
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 8000);
+
+      try {
+        const response = await fetch(url, {
+          headers: { Accept: 'application/json' },
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          errors.push(`${url} -> HTTP ${response.status}`);
+          continue;
+        }
+
+        const payload = await response.json();
+        const grid = parseContributionPayload(payload);
+        if (grid) return grid;
+
+        errors.push(`${url} -> no usable contribution data`);
+      } catch (error) {
+        errors.push(`${url} -> ${error.message || 'request failed'}`);
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    throw new Error(errors.join(' | '));
+  }
+
+  async function loadContributionGraphForUser(username, options = {}) {
+    const trimmed = (username || '').trim();
+    if (!trimmed) {
+      setGraphStatus('Enter a GitHub username first.', true);
+      return false;
+    }
+
+    if (!isValidGitHubUsername(trimmed)) {
+      setGraphStatus('That username format is invalid.', true);
+      return false;
+    }
+
+    loadGraphBtn.disabled = true;
+    setGraphStatus(options.isAutoLoad
+      ? `Loading saved graph for @${trimmed}…`
+      : `Loading contribution graph for @${trimmed}…`);
+
+    try {
+      const grid = await fetchContributionGrid(trimmed);
+      buildBlocksFromCommitData(grid);
+      buildUICommitGraph();
+      localStorage.setItem(STORAGE_USERNAME_KEY, trimmed);
+      githubUserInput.value = trimmed;
+      setGraphStatus(`Loaded @${trimmed}'s contribution graph.`);
+      return true;
+    } catch (error) {
+      setGraphStatus('Could not load live contributions. Using demo graph instead.', true);
+      if (!commitData) {
+        buildBlocksFromCommitData(generateDemoCommitData());
+        buildUICommitGraph();
+      }
+      console.warn('Contribution graph load failed:', error.message || error);
+      return false;
+    } finally {
+      loadGraphBtn.disabled = false;
+    }
+  }
+
   function buildUICommitGraph() {
-    const data = commitData || generateCommitData();
+    const data = commitData || generateDemoCommitData();
     commitGraphEl.innerHTML = '';
     const colors = [null, '#9be9a8', '#40c463', '#30a14e', '#216e39'];
     for (let row = 0; row < GRID_ROWS; row++) {
@@ -266,7 +536,39 @@
       commitGraphEl.appendChild(rowEl);
     }
   }
+
+  async function initializeContributionGraph() {
+    const savedUser = (localStorage.getItem(STORAGE_USERNAME_KEY) || '').trim();
+    if (savedUser) {
+      githubUserInput.value = savedUser;
+      const loaded = await loadContributionGraphForUser(savedUser, { isAutoLoad: true });
+      if (loaded) return;
+    }
+
+    if (!commitData) {
+      buildBlocksFromCommitData(generateDemoCommitData());
+      buildUICommitGraph();
+    }
+    setGraphStatus('Tip: enter your GitHub username to personalize the bricks.');
+  }
+
+  // Build default graph immediately so gameplay can start without waiting on network.
+  buildBlocksFromCommitData(generateDemoCommitData());
+
   buildUICommitGraph();
+
+  loadGraphBtn.addEventListener('click', () => {
+    loadContributionGraphForUser(githubUserInput.value);
+  });
+
+  githubUserInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      loadContributionGraphForUser(githubUserInput.value);
+    }
+  });
+
+  initializeContributionGraph();
 
   // ─── Paddle ─────────────────────────────────────────────────
   const paddleGeo = new THREE.BoxGeometry(PADDLE_W, PADDLE_H, PADDLE_D);
@@ -723,7 +1025,7 @@
     });
     particles.length = 0;
 
-    buildBlocks();
+    rebuildBlocksFromCurrentData();
     buildUICommitGraph();
     startGame();
   }

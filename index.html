@@ -141,6 +141,55 @@
       background: #161b22;
     }
 
+    #graphControls {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin-top: 16px;
+    }
+    #githubUserInput {
+      width: 220px;
+      padding: 10px 12px;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      background: #0d1117;
+      color: #e6edf3;
+      outline: none;
+      font-size: 14px;
+    }
+    #githubUserInput:focus {
+      border-color: #40c463;
+      box-shadow: 0 0 0 2px rgba(64, 196, 99, 0.15);
+    }
+    #loadGraphBtn {
+      padding: 10px 14px;
+      border-radius: 8px;
+      border: 1px solid #2ea043;
+      background: #238636;
+      color: #ffffff;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .2s ease;
+    }
+    #loadGraphBtn:hover {
+      background: #2ea043;
+    }
+    #loadGraphBtn:disabled {
+      cursor: wait;
+      opacity: 0.75;
+    }
+    #graphStatus {
+      margin-top: 10px;
+      min-height: 18px;
+      font-size: 13px;
+      color: #8b949e;
+      text-align: center;
+    }
+    #graphStatus.error {
+      color: #f85149;
+    }
+
     #startHint {
       margin-top: 32px;
       font-size: 16px;
@@ -163,6 +212,15 @@
       margin-top: 12px;
       font-size: 13px;
       color: #484f58;
+    }
+
+    @media (max-width: 700px) {
+      #graphControls {
+        flex-direction: column;
+      }
+      #githubUserInput {
+        width: 240px;
+      }
     }
 
     @keyframes pulse {
@@ -248,6 +306,11 @@
     <div id="title">GitHub Breakout</div>
     <div id="subtitle">3D · Face-Tracked · Commit-Graph Edition</div>
     <div id="commitGraph"></div>
+    <div id="graphControls">
+      <input id="githubUserInput" type="text" placeholder="GitHub username" autocomplete="username" spellcheck="false" />
+      <button id="loadGraphBtn" type="button">Load My Graph</button>
+    </div>
+    <div id="graphStatus">Tip: load your real GitHub graph before starting.</div>
     <div id="startHint">Tap or press <kbd>SPACE</kbd> to start</div>
     <div id="cameraHint">📷 Allow camera access for face-tracking controls</div>
   </div>
