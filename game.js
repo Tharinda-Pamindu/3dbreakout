@@ -520,6 +520,71 @@
     throw new Error(errors.join(' | '));
   }
 
+  async function fetchContributionGridFromGitHubEvents(username) {
+    const encoded = encodeURIComponent(username);
+    const perPage = 100;
+    const maxPages = 3;
+    const dayCounts = new Map();
+
+    for (let page = 1; page <= maxPages; page++) {
+      const url = `https://api.github.com/users/${encoded}/events/public?per_page=${perPage}&page=${page}`;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 12000);
+
+      try {
+        const response = await fetch(url, {
+          headers: {
+            Accept: 'application/vnd.github+json',
+            'X-GitHub-Api-Version': '2022-11-28',
+          },
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          if (page === 1) {
+            throw new Error(`GitHub events endpoint HTTP ${response.status}`);
+          }
+          break;
+        }
+
+        const events = await response.json();
+        if (!Array.isArray(events) || events.length === 0) {
+          break;
+        }
+
+        for (let i = 0; i < events.length; i++) {
+          const createdAt = events[i] && events[i].created_at;
+          if (typeof createdAt !== 'string') continue;
+
+          const parsed = parseDateToUTC(createdAt);
+          if (!parsed) continue;
+
+          const iso = toISODateUTC(parsed);
+          dayCounts.set(iso, (dayCounts.get(iso) || 0) + 1);
+        }
+
+        if (events.length < perPage) {
+          break;
+        }
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    if (dayCounts.size === 0) {
+      throw new Error('No GitHub public events available for fallback.');
+    }
+
+    const pairs = Array.from(dayCounts.entries()).map(([date, count]) => ({ date, count }));
+    const grid = pairsToCommitGrid(pairs);
+
+    if (!grid) {
+      throw new Error('Could not convert GitHub public events to graph grid.');
+    }
+
+    return grid;
+  }
+
   async function fetchContributionGrid(username) {
     const encoded = encodeURIComponent(username);
     const urls = [
@@ -533,7 +598,7 @@
     for (let i = 0; i < urls.length; i++) {
       const url = urls[i];
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 8000);
+      const timer = setTimeout(() => controller.abort(), 12000);
 
       try {
         const response = await fetch(url, {
@@ -548,7 +613,12 @@
 
         const payload = await response.json();
         const grid = parseContributionPayload(payload);
-        if (grid) return grid;
+        if (grid) {
+          return {
+            grid,
+            source: i === 0 ? 'contribution-api' : 'contribution-api-fallback',
+          };
+        }
 
         errors.push(`${url} -> no usable contribution data`);
       } catch (error) {
@@ -559,7 +629,15 @@
     }
 
     try {
-      return await fetchContributionGridFromSvg(username);
+      const grid = await fetchContributionGridFromGitHubEvents(username);
+      return { grid, source: 'github-events-fallback' };
+    } catch (eventsError) {
+      errors.push(`github events fallback -> ${eventsError.message || eventsError}`);
+    }
+
+    try {
+      const grid = await fetchContributionGridFromSvg(username);
+      return { grid, source: 'svg-fallback' };
     } catch (svgError) {
       errors.push(`svg fallback -> ${svgError.message || svgError}`);
     }
@@ -581,10 +659,19 @@
       : `Loading contribution graph for @${normalized}…`);
 
     try {
-      const grid = await fetchContributionGrid(normalized);
+      const result = await fetchContributionGrid(normalized);
+      const grid = result.grid;
       buildBlocksFromCommitData(grid);
       buildUICommitGraph();
-      setGraphStatus(`Loaded @${normalized}'s contribution graph.`);
+
+      if (result.source === 'contribution-api' || result.source === 'contribution-api-fallback') {
+        setGraphStatus(`Loaded @${normalized}'s contribution graph.`);
+      } else if (result.source === 'github-events-fallback') {
+        setGraphStatus(`Loaded @${normalized} from GitHub public events fallback.`);
+      } else {
+        setGraphStatus(`Loaded @${normalized} from SVG fallback source.`);
+      }
+
       return true;
     } catch (error) {
       setGraphStatus(`Could not load @${normalized}'s live contributions. Using demo graph instead.`, true);
