@@ -82,7 +82,6 @@
   const livesDisplay = document.getElementById('livesDisplay');
   const loadingEl = document.getElementById('loading');
   const commitGraphEl = document.getElementById('commitGraph');
-  const githubUserInput = document.getElementById('githubUserInput');
   const loadGraphBtn = document.getElementById('loadGraphBtn');
   const graphStatus = document.getElementById('graphStatus');
 
@@ -167,7 +166,7 @@
   // ─── Blocks (Commit Graph) ─────────────────────────────────
   const blocks = [];
   const blockGeo = new THREE.BoxGeometry(BLOCK_SIZE, BLOCK_SIZE, BLOCK_DEPTH);
-  const STORAGE_USERNAME_KEY = 'gh-breakout-username';
+  const FIXED_GITHUB_USERNAME = 'Tharinda-Pamindu';
 
   let commitData = null;
 
@@ -439,41 +438,6 @@
     return /^[a-z\d](?:[a-z\d]|-(?=[a-z\d])){0,38}$/i.test(name);
   }
 
-  function normalizeGitHubUsername(input) {
-    const raw = (input || '').trim();
-    if (!raw) return '';
-
-    // Accept @username directly.
-    if (raw.startsWith('@')) {
-      return raw.slice(1).trim();
-    }
-
-    // Accept full profile URLs like https://github.com/user or github.com/user.
-    const looksLikeUrl = /^https?:\/\//i.test(raw) || /^github\.com\//i.test(raw);
-    if (!looksLikeUrl) {
-      return raw;
-    }
-
-    try {
-      const url = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
-      const host = url.hostname.toLowerCase();
-      if (host !== 'github.com' && host !== 'www.github.com') {
-        return raw;
-      }
-
-      const parts = url.pathname.split('/').filter(Boolean);
-      if (parts.length === 0) return '';
-
-      if (parts[0] === 'users' && parts[1]) {
-        return parts[1];
-      }
-
-      return parts[0];
-    } catch {
-      return raw;
-    }
-  }
-
   function parseContributionSvg(svgText) {
     if (typeof svgText !== 'string' || !svgText.trim()) return null;
 
@@ -603,33 +567,27 @@
     throw new Error(errors.join(' | '));
   }
 
-  async function loadContributionGraphForUser(username, options = {}) {
-    const normalized = normalizeGitHubUsername(username);
-    if (!normalized) {
-      setGraphStatus('Enter a GitHub username first.', true);
-      return false;
-    }
+  async function loadContributionGraphForUser(options = {}) {
+    const normalized = FIXED_GITHUB_USERNAME;
 
     if (!isValidGitHubUsername(normalized)) {
-      setGraphStatus('Use a valid GitHub username or profile URL.', true);
+      setGraphStatus('Configured GitHub username is invalid.', true);
       return false;
     }
 
     loadGraphBtn.disabled = true;
     setGraphStatus(options.isAutoLoad
-      ? `Loading saved graph for @${normalized}…`
+      ? `Loading @${normalized}'s graph…`
       : `Loading contribution graph for @${normalized}…`);
 
     try {
       const grid = await fetchContributionGrid(normalized);
       buildBlocksFromCommitData(grid);
       buildUICommitGraph();
-      localStorage.setItem(STORAGE_USERNAME_KEY, normalized);
-      githubUserInput.value = normalized;
       setGraphStatus(`Loaded @${normalized}'s contribution graph.`);
       return true;
     } catch (error) {
-      setGraphStatus('Could not load live contributions. Using demo graph instead.', true);
+      setGraphStatus(`Could not load @${normalized}'s live contributions. Using demo graph instead.`, true);
       if (!commitData) {
         buildBlocksFromCommitData(generateDemoCommitData());
         buildUICommitGraph();
@@ -661,18 +619,14 @@
   }
 
   async function initializeContributionGraph() {
-    const savedUser = (localStorage.getItem(STORAGE_USERNAME_KEY) || '').trim();
-    if (savedUser) {
-      githubUserInput.value = savedUser;
-      const loaded = await loadContributionGraphForUser(savedUser, { isAutoLoad: true });
-      if (loaded) return;
-    }
+    const loaded = await loadContributionGraphForUser({ isAutoLoad: true });
+    if (loaded) return;
 
     if (!commitData) {
       buildBlocksFromCommitData(generateDemoCommitData());
       buildUICommitGraph();
     }
-    setGraphStatus('Tip: enter your GitHub username to personalize the bricks.');
+    setGraphStatus(`Using local demo graph while loading @${FIXED_GITHUB_USERNAME} is unavailable.`, true);
   }
 
   // Build default graph immediately so gameplay can start without waiting on network.
@@ -681,14 +635,7 @@
   buildUICommitGraph();
 
   loadGraphBtn.addEventListener('click', () => {
-    loadContributionGraphForUser(githubUserInput.value);
-  });
-
-  githubUserInput.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      loadContributionGraphForUser(githubUserInput.value);
-    }
+    loadContributionGraphForUser();
   });
 
   initializeContributionGraph();

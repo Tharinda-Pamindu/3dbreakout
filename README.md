@@ -5,7 +5,7 @@ A 3D breakout game themed after the GitHub contribution graph, with webcam face-
 ## Features
 
 - **GitHub Commit Graph Blocks** — Blocks are styled as the green contribution squares, with colors matching the real GitHub palette
-- **Personalized Contribution Layout** — Enter your GitHub username to load your own recent contribution pattern into the brick grid
+- **Fixed Personal Contribution Layout** — The game auto-loads @Tharinda-Pamindu's recent contribution pattern into the brick grid
 - **Face-Tracked Paddle** — Move your head left/right to control the paddle using your webcam
 - **Head-Coupled Parallax** — The 3D camera adjusts based on your head position, creating a depth "window" effect
 - **Sparkle Explosions** — Blocks shatter into colored cube fragments and sparkle particles when hit
@@ -16,16 +16,15 @@ A 3D breakout game themed after the GitHub contribution graph, with webcam face-
 
 1. Open `index.html` in a modern browser (Chrome/Edge recommended)
 2. Allow camera access when prompted
-3. (Optional) Enter your GitHub username or paste your profile URL on the start screen and click **Load My Graph**
+3. The game automatically loads @Tharinda-Pamindu's contribution graph on startup (use **Reload My Graph** to retry)
 4. Press **SPACE** to start
 5. Move your head left/right to move the paddle
 6. Break all the blocks to win!
 
 ## Personalized Graph Notes
 
-- The game loads your graph from public contribution APIs and maps your recent activity into the 7x20 brick layout.
+- The game loads @Tharinda-Pamindu's graph from public contribution APIs and maps recent activity into the 7x20 brick layout.
 - If loading fails (network/CORS/rate-limit), the game automatically falls back to the demo graph.
-- Your last successful username is saved in browser storage and auto-loaded on your next visit.
 
 ## Scoring
 

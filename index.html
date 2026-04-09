@@ -147,20 +147,6 @@
       align-items: center;
       margin-top: 16px;
     }
-    #githubUserInput {
-      width: 220px;
-      padding: 10px 12px;
-      border: 1px solid #30363d;
-      border-radius: 8px;
-      background: #0d1117;
-      color: #e6edf3;
-      outline: none;
-      font-size: 14px;
-    }
-    #githubUserInput:focus {
-      border-color: #40c463;
-      box-shadow: 0 0 0 2px rgba(64, 196, 99, 0.15);
-    }
     #loadGraphBtn {
       padding: 10px 14px;
       border-radius: 8px;
@@ -217,9 +203,6 @@
     @media (max-width: 700px) {
       #graphControls {
         flex-direction: column;
-      }
-      #githubUserInput {
-        width: 240px;
       }
     }
 
@@ -307,10 +290,9 @@
     <div id="subtitle">3D · Face-Tracked · Commit-Graph Edition</div>
     <div id="commitGraph"></div>
     <div id="graphControls">
-      <input id="githubUserInput" type="text" placeholder="GitHub username or profile URL" autocomplete="username" spellcheck="false" />
-      <button id="loadGraphBtn" type="button">Load My Graph</button>
+      <button id="loadGraphBtn" type="button">Reload My Graph</button>
     </div>
-    <div id="graphStatus">Tip: paste username or profile URL, then load your graph.</div>
+    <div id="graphStatus">Loading fixed account graph: @Tharinda-Pamindu</div>
     <div id="startHint">Tap or press <kbd>SPACE</kbd> to start</div>
     <div id="cameraHint">📷 Allow camera access for face-tracking controls</div>
   </div>
